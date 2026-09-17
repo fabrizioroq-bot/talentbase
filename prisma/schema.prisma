@@ -1,0 +1,103 @@
+// TalentBase — Prisma schema
+// Postgres (Supabase) with the pgvector extension for CV embeddings.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  directUrl  = env("DIRECT_URL")
+  extensions = [vector]
+}
+
+model Candidate {
+  id                String   @id @default(cuid())
+  fullName          String
+  email             String?
+  phone             String?
+  currentRole       String?
+  yearsOfExperience Float?
+  skills            String[] @default([])
+  languages         String[] @default([])
+  certifications    String[] @default([])
+  summary           String?
+
+  // Full extracted plain text of the CV, used to (re)generate the embedding.
+  rawText String
+
+  // pgvector column (OpenAI text-embedding-3-small, 1536 dims). Prisma Client
+  // has no native vector type, so this column is written/read via raw SQL —
+  // see lib/db/embeddings.ts. Kept here so `prisma migrate` still manages it.
+  embedding Unsupported("vector(1536)")?
+
+  sourceFileUrl  String // path inside the private Supabase Storage bucket
+  sourceFileName String
+  sourceFileType String // "pdf" | "docx"
+
+  workExperience WorkExperience[]
+  education      Education[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([email])
+  @@index([fullName])
+}
+
+model WorkExperience {
+  id          String    @id @default(cuid())
+  candidateId String
+  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  company     String
+  title       String
+  // Stored as free text ("Jan 2020", "2020", "Present", ...) because source
+  // CVs use inconsistent date formats that don't reliably coerce to DateTime.
+  startDate   String?
+  endDate     String?
+  isCurrent   Boolean @default(false)
+  description String?
+  sortOrder   Int     @default(0)
+
+  @@index([candidateId])
+}
+
+model Education {
+  id          String    @id @default(cuid())
+  candidateId String
+  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  institution  String
+  degree       String?
+  fieldOfStudy String?
+  startDate    String?
+  endDate      String?
+  sortOrder    Int     @default(0)
+
+  @@index([candidateId])
+}
+
+model ChatConversation {
+  id        String        @id @default(cuid())
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  messages  ChatMessage[]
+}
+
+model ChatMessage {
+  id             String           @id @default(cuid())
+  conversationId String
+  conversation   ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  role              String // "user" | "assistant"
+  content           String
+  citedCandidateIds String[] @default([])
+  refused           Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([conversationId])
+}
